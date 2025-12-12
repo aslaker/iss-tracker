@@ -1,0 +1,5 @@
+{
+  "name": "ISS Tracker - Matrix Edition",
+  "description": "Real-time ISS tracking dashboard with a retro MS-DOS/Matrix aesthetic. Features 3D globe visualization, crew manifest, and live telemetry data.",
+  "requestFramePermissions": []
+}
