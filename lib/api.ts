@@ -1,4 +1,4 @@
-import { ISSPosition, CrewData } from '../types';
+import { ISSPosition, CrewData, Astronaut } from '../types';
 // @ts-ignore
 import * as satellite from 'satellite.js';
 
@@ -10,15 +10,53 @@ const POSITION_API_LEGACY = 'http://api.open-notify.org/iss-now.json';
 const CREW_API = 'http://api.open-notify.org/astros.json';
 const PROXY_URL = 'https://api.allorigins.win/raw?url=';
 
+// The Space Devs API (Launch Library 2)
+const LL2_API_ASTRONAUTS = 'https://ll.thespacedevs.com/2.2.0/astronaut/?status=1&limit=50';
+
 // TLE Sources
 const TLE_API_PRIMARY = 'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE';
 const TLE_API_BACKUP = 'https://live.ariss.org/iss.txt'; 
 
-// Fallback TLE (Updated late 2024)
+// Fallback TLE
 const FALLBACK_TLE = [
   "1 25544U 98067A   24140.59865741  .00016717  00000+0  30076-3 0  9995",
   "2 25544  51.6396 235.1195 0005470 216.5982 256.4024 15.49818898442371"
 ];
+
+// --- MISSION DATABASE (Local Fallback) ---
+// Used when Live API is rate-limited or data is missing.
+interface MissionProfile {
+  start: string;
+  end?: string;
+  role: string;
+  agency?: string;
+}
+
+const MISSION_DB: Record<string, MissionProfile> = {
+  // Crew-8
+  "Matthew Dominick": { start: "2024-03-04", role: "Commander", agency: "NASA" },
+  "Michael Barratt": { start: "2024-03-04", role: "Pilot", agency: "NASA" },
+  "Jeanette Epps": { start: "2024-03-04", role: "Mission Specialist", agency: "NASA" },
+  "Alexander Grebenkin": { start: "2024-03-04", role: "Flight Engineer", agency: "Roscosmos" },
+
+  // Soyuz MS-25
+  "Tracy Caldwell Dyson": { start: "2024-03-23", end: "2024-09-23", role: "Flight Engineer", agency: "NASA" },
+  "Oleg Kononenko": { start: "2023-09-15", end: "2024-09-23", role: "Commander", agency: "Roscosmos" },
+  "Nikolai Chub": { start: "2023-09-15", end: "2024-09-23", role: "Flight Engineer", agency: "Roscosmos" },
+
+  // Starliner CFT (Extended Stay)
+  "Barry Wilmore": { start: "2024-06-05", role: "Commander", agency: "NASA" },
+  "Sunita Williams": { start: "2024-06-05", role: "Pilot", agency: "NASA" },
+
+  // Soyuz MS-26
+  "Donald Pettit": { start: "2024-09-11", role: "Flight Engineer", agency: "NASA" },
+  "Alexey Ovchinin": { start: "2024-09-11", role: "Commander", agency: "Roscosmos" },
+  "Ivan Vagner": { start: "2024-09-11", role: "Flight Engineer", agency: "Roscosmos" },
+  
+  // Crew-9
+  "Nick Hague": { start: "2024-09-28", role: "Commander", agency: "NASA" },
+  "Aleksandr Gorbunov": { start: "2024-09-28", role: "Mission Specialist", agency: "Roscosmos" }
+};
 
 // Helper: Strict number validation
 const isValidNumber = (n: any): boolean => typeof n === 'number' && !isNaN(n) && isFinite(n);
@@ -29,7 +67,6 @@ const normalizeLongitude = (lon: number): number => {
 };
 
 export const fetchISSPosition = async (): Promise<ISSPosition> => {
-  // Strategy: Try Primary HTTPS API first. If it fails, try legacy API via Proxy.
   try {
     const response = await fetch(WTIA_API);
     if (!response.ok) throw new Error(`WTIA API Error: ${response.status}`);
@@ -43,14 +80,11 @@ export const fetchISSPosition = async (): Promise<ISSPosition> => {
       latitude: data.latitude,
       longitude: data.longitude,
       timestamp: data.timestamp,
-      altitude: data.altitude, // Actual real-time altitude
-      velocity: data.velocity, // Actual real-time velocity
-      visibility: data.visibility // 'daylight' or 'eclipsed'
+      altitude: data.altitude,
+      velocity: data.velocity,
+      visibility: data.visibility
     };
   } catch (primaryError) {
-    console.warn("Primary Position API failed, attempting fallback...", primaryError);
-
-    // Fallback path
     try {
       const url = `${PROXY_URL}${encodeURIComponent(POSITION_API_LEGACY)}`;
       const response = await fetch(url);
@@ -68,8 +102,8 @@ export const fetchISSPosition = async (): Promise<ISSPosition> => {
         latitude: lat,
         longitude: lon,
         timestamp: data.timestamp,
-        altitude: 417.5, // Constant fallback
-        velocity: 27600, // Constant fallback
+        altitude: 417.5,
+        velocity: 27600,
         visibility: 'orbiting'
       };
     } catch (fallbackError) {
@@ -81,38 +115,99 @@ export const fetchISSPosition = async (): Promise<ISSPosition> => {
 
 export const fetchCrewData = async (): Promise<CrewData> => {
   try {
-    const response = await fetch(`${PROXY_URL}${encodeURIComponent(CREW_API)}`);
-    if (!response.ok) throw new Error('Crew fetch failed');
-    return await response.json();
+    // 1. Fetch Basic List (Authoritative)
+    const basicResponse = await fetch(`${PROXY_URL}${encodeURIComponent(CREW_API)}`);
+    if (!basicResponse.ok) throw new Error('Basic crew fetch failed');
+    const basicData = await basicResponse.json();
+    
+    // Filter only ISS crew
+    const issCrew = (basicData.people || []).filter((p: any) => p.craft === 'ISS');
+    let richAstronauts: any[] = [];
+
+    // 2. Try to fetch Rich Data (SpaceDevs)
+    try {
+      const richResponse = await fetch(LL2_API_ASTRONAUTS);
+      if (richResponse.ok) {
+        const richData = await richResponse.json();
+        richAstronauts = richData.results || [];
+      }
+    } catch (enrichmentError) {
+      console.warn("LL2 Enrichment skipped/failed (using DB fallback)", enrichmentError);
+    }
+
+    // 3. Merge Strategy: Basic -> Local DB -> Live API
+    const mergedCrew = issCrew.map((basicAstronaut: any) => {
+      // Step A: Look up in Local DB
+      const dbData = MISSION_DB[basicAstronaut.name];
+
+      // Step B: Look up in Live API
+      const liveData = richAstronauts.find((ra: any) => 
+        ra.name.toLowerCase().includes(basicAstronaut.name.toLowerCase()) || 
+        basicAstronaut.name.toLowerCase().includes(ra.name.toLowerCase())
+      );
+
+      // Extract Launch Date: Live API > DB > Undefined
+      let launchDate = undefined;
+      if (liveData) {
+        // Sort flights to find the active one
+        const flights = (liveData.flights || []).sort((a: any, b: any) => 
+            new Date(b.window_start || 0).getTime() - new Date(a.window_start || 0).getTime()
+        );
+        launchDate = flights[0]?.window_start;
+      }
+      // Fallback to DB if live data missing or no launch date found
+      if (!launchDate && dbData) {
+        launchDate = dbData.start;
+      }
+
+      return {
+        ...basicAstronaut,
+        // Live image > None (DB doesn't store images to save space)
+        image: liveData?.profile_image_thumbnail || liveData?.profile_image,
+        // Live role > DB role > Default
+        role: liveData?.type?.name || dbData?.role || "Astronaut",
+        // Live agency > DB agency
+        agency: liveData?.agency?.name || dbData?.agency,
+        bio: liveData?.bio,
+        launchDate: launchDate,
+        endDate: dbData?.end // Prefer DB for end dates as API often omits them for active missions
+      };
+    });
+
+    return {
+      message: "success",
+      number: mergedCrew.length,
+      people: mergedCrew
+    };
+
   } catch (e) {
-    console.warn("Crew data fetch failed, using cached manifest.");
+    console.warn("Crew data fetch completely failed, using cached manifest.");
+    // Emergency Fallback if OpenNotify fails completely
+    const fallbackList = Object.keys(MISSION_DB).map(name => ({
+        name,
+        craft: 'ISS',
+        ...MISSION_DB[name],
+        launchDate: MISSION_DB[name].start,
+        endDate: MISSION_DB[name].end
+    }));
+
     return {
         message: "cached_fallback",
-        number: 7,
-        people: [
-            { name: "Jasmin Moghbeli", craft: "ISS" },
-            { name: "Andreas Mogensen", craft: "ISS" },
-            { name: "Satoshi Furukawa", craft: "ISS" },
-            { name: "Konstantin Borisov", craft: "ISS" },
-            { name: "Oleg Kononenko", craft: "ISS" },
-            { name: "Nikolai Chub", craft: "ISS" },
-            { name: "Loral O'Hara", craft: "ISS" }
-        ]
+        number: fallbackList.length,
+        people: fallbackList
     };
   }
 };
 
 const fetchTLEFromUrl = async (url: string): Promise<[string, string]> => {
-  // Try direct fetch first (Celestrak supports CORS/HTTPS)
   try {
     const response = await fetch(url);
     if (response.ok) {
       const text = await response.text();
       return parseTLELines(text);
     }
-  } catch(e) { /* ignore direct fetch error, try proxy next */ }
+  } catch(e) { /* ignore */ }
 
-  // Try via proxy
   const proxyUrl = `${PROXY_URL}${encodeURIComponent(url)}`;
   const response = await fetch(proxyUrl);
   if (!response.ok) throw new Error(`TLE fetch failed from ${url}`);
@@ -125,9 +220,7 @@ const parseTLELines = (text: string): [string, string] => {
   const line1 = lines.find(l => l.startsWith('1 25544U'));
   const line2 = lines.find(l => l.startsWith('2 25544'));
 
-  if (line1 && line2) {
-    return [line1.trim(), line2.trim()];
-  }
+  if (line1 && line2) return [line1.trim(), line2.trim()];
   throw new Error('Invalid TLE format');
 }
 
@@ -135,11 +228,9 @@ export const fetchTLE = async (): Promise<[string, string]> => {
   try {
     return await fetchTLEFromUrl(TLE_API_PRIMARY);
   } catch (e) {
-    console.warn("Primary TLE failed, trying backup...");
     try {
       return await fetchTLEFromUrl(TLE_API_BACKUP);
     } catch (backupError) {
-      console.warn("All TLE fetches failed, using internal fallback");
       return [FALLBACK_TLE[0], FALLBACK_TLE[1]];
     }
   }
@@ -154,7 +245,7 @@ export interface PredictedPoint {
 export const calculateOrbitPath = (line1: string, line2: string, startMins: number, endMins: number, stepMins: number = 1): PredictedPoint[] => {
   const points: PredictedPoint[] = [];
   try {
-    const satLib = satellite.default || satellite;
+    const satLib = (satellite as any).default || satellite;
     if (!satLib || !satLib.twoline2satrec) return [];
 
     const satrec = satLib.twoline2satrec(line1, line2);
@@ -164,7 +255,6 @@ export const calculateOrbitPath = (line1: string, line2: string, startMins: numb
 
     for (let i = startMins; i <= endMins; i += stepMins) {
       const time = new Date(now.getTime() + i * 60 * 1000);
-      
       const positionAndVelocity = satLib.propagate(satrec, time);
       const positionEci = positionAndVelocity.position;
 
@@ -191,7 +281,6 @@ export const calculateOrbitPath = (line1: string, line2: string, startMins: numb
   return points;
 };
 
-// Backwards compatibility alias
 export const predictOrbit = (l1: string, l2: string, duration: number) => calculateOrbitPath(l1, l2, 0, duration);
 
 export const formatCoordinate = (val: number, type: 'lat' | 'lon'): string => {
@@ -202,46 +291,33 @@ export const formatCoordinate = (val: number, type: 'lat' | 'lon'): string => {
   return `${Math.abs(val).toFixed(4)}° ${dir}`;
 };
 
-// --- Orbital Solver Utilities ---
-
 export interface OrbitalData {
-  inclination: number; // degrees
+  inclination: number;
   eccentricity: number;
-  meanMotion: number; // revs per day
-  period: number; // minutes
-  apogee: number; // km
-  perigee: number; // km
+  meanMotion: number;
+  period: number;
+  apogee: number;
+  perigee: number;
 }
 
 export const calculateOrbitalParameters = (line1: string, line2: string): OrbitalData | null => {
   try {
-    const satLib = satellite.default || satellite;
+    const satLib = (satellite as any).default || satellite;
     const satrec = satLib.twoline2satrec(line1, line2);
     if (!satrec) return null;
 
-    // Conversions
-    // satrec.no is in radians/minute
-    // satrec.inclo is in radians
-    // satrec.ecco is dimensionless
-    
     const MEAN_MOTION_REV_PER_DAY = satrec.no * 1440 / (2 * Math.PI); 
     const INCLINATION_DEG = satrec.inclo * 180 / Math.PI;
     const ECCENTRICITY = satrec.ecco;
     
-    // Semi-major axis (a) in km calculation
-    // Standard gravitational parameter for Earth (mu) = 398600.4418 km^3/s^2
-    // Mean motion (n) must be in rad/s for this formula
     const n_rad_s = satrec.no / 60;
     const mu = 398600.4418;
     const a = Math.pow(mu / (n_rad_s * n_rad_s), 1/3);
-    
-    // Earth Radius approximation
-    const EARTH_RADIUS = 6378.137; // km
+    const EARTH_RADIUS = 6378.137;
     
     const perigee = (a * (1 - ECCENTRICITY)) - EARTH_RADIUS;
     const apogee = (a * (1 + ECCENTRICITY)) - EARTH_RADIUS;
-    
-    const period = (2 * Math.PI) / n_rad_s / 60; // minutes
+    const period = (2 * Math.PI) / n_rad_s / 60;
 
     return {
       inclination: INCLINATION_DEG,
@@ -252,7 +328,6 @@ export const calculateOrbitalParameters = (line1: string, line2: string): Orbita
       perigee
     };
   } catch (e) {
-    console.error("Orbital params calculation failed", e);
     return null;
   }
 };

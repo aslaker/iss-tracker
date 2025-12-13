@@ -1,3 +1,4 @@
+
 export interface OpenNotifyPositionResponse {
   message: string;
   timestamp: number;
@@ -20,6 +21,13 @@ export interface ISSPosition {
 export interface Astronaut {
   name: string;
   craft: string;
+  // Extended fields from SpaceDevs API
+  image?: string;
+  role?: string;
+  launchDate?: string;
+  endDate?: string; // Support for specific return dates (e.g. delayed missions)
+  bio?: string;
+  agency?: string;
 }
 
 export interface CrewData {

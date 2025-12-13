@@ -242,7 +242,7 @@ const memoryHistory = createMemoryHistory({
 const router = createRouter({ 
   routeTree,
   history: memoryHistory,
-});
+} as any);
 
 export default function App() {
   return (
