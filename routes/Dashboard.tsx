@@ -4,8 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchISSPosition, fetchTLE, calculateOrbitPath } from '../lib/api';
 import { StatsPanel } from '../components/StatsPanel';
 import { OrbitalSolver } from '../components/OrbitalSolver';
+import { FlyoverControl } from '../components/FlyoverControl';
 import { Minimize, RotateCw, Calculator } from 'lucide-react';
 import { terminalAudio } from '../lib/audio';
+import { useLocationContext } from '../context/LocationContext';
 
 export const ISSTracker: React.FC = () => {
   const globeEl = useRef<GlobeMethods | undefined>(undefined);
@@ -13,6 +15,9 @@ export const ISSTracker: React.FC = () => {
   const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [showOrbitalSolver, setShowOrbitalSolver] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // User Location Context
+  const { userLocation, nextPass } = useLocationContext();
 
   // Live Position
   const { data, isLoading, isError } = useQuery({
@@ -43,7 +48,7 @@ export const ISSTracker: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Center Globe on ISS
+  // Center Globe on ISS (Initial or manual trigger)
   useEffect(() => {
     if (data && globeEl.current && 
         typeof data.latitude === 'number' && !isNaN(data.latitude) &&
@@ -65,54 +70,89 @@ export const ISSTracker: React.FC = () => {
     const hist = calculateOrbitPath(tleData[0], tleData[1], -45, 0);
     const pred = calculateOrbitPath(tleData[0], tleData[1], 0, 60);
 
-    // CRITICAL: Three.js will crash if passed empty arrays nested in pathsData
-    // We strictly filter for arrays that have length > 0
     return { 
       historyPath: hist.length > 0 ? hist : [], 
       predictedPath: pred.length > 0 ? pred : [] 
     };
   }, [tleData]);
 
-  // Consolidate paths for the globe prop. Filter out empty arrays.
+  // Consolidate paths for the globe prop. 
+  // ADDITION: If nextPass exists, add it as a distinct yellow path
   const globePathsData = useMemo(() => {
       const paths = [];
       if (historyPath.length > 1) paths.push(historyPath);
       if (predictedPath.length > 1) paths.push(predictedPath);
+      
+      // Add the flyover arc if valid
+      if (nextPass && nextPass.path && nextPass.path.length > 1) {
+          paths.push(nextPass.path);
+      }
       return paths;
-  }, [historyPath, predictedPath]);
+  }, [historyPath, predictedPath, nextPass]);
 
-  // STRICT NaN CHECK for Points Data
+  // Points Data: ISS + User Location
   const gData = useMemo(() => {
+    const points = [];
+
+    // 1. ISS
     if (data && 
         typeof data.latitude === 'number' && !isNaN(data.latitude) && 
         typeof data.longitude === 'number' && !isNaN(data.longitude)) {
-      return [{
+      points.push({
         lat: data.latitude,
         lng: data.longitude,
         alt: 0.1,
         radius: 1.5,
-        color: '#00FF41'
-      }];
+        color: '#00FF41',
+        label: 'ISS'
+      });
     }
-    return [];
-  }, [data]);
 
-  // STRICT NaN CHECK for Rings Data
+    // 2. User Location (Target)
+    if (userLocation) {
+        points.push({
+            lat: userLocation.lat,
+            lng: userLocation.lng,
+            alt: 0.02,
+            radius: 0.8,
+            color: '#FFD700', // Gold
+            label: 'USER'
+        });
+    }
+
+    return points;
+  }, [data, userLocation]);
+
+  // Rings Data (ISS Ping) + User Ping
   const ringsData = useMemo(() => {
-    if (data && 
-        typeof data.latitude === 'number' && !isNaN(data.latitude) && 
-        typeof data.longitude === 'number' && !isNaN(data.longitude)) {
-      return [{
+    const rings = [];
+    
+    if (data && !isNaN(data.latitude)) {
+      rings.push({
         lat: data.latitude,
         lng: data.longitude,
         alt: 0.1,
         maxR: 8,
         propagationSpeed: 4,
-        repeatPeriod: 1000
-      }];
+        repeatPeriod: 1000,
+        color: '#00FF41'
+      });
     }
-    return [];
-  }, [data]);
+
+    if (userLocation) {
+        rings.push({
+            lat: userLocation.lat,
+            lng: userLocation.lng,
+            alt: 0.02,
+            maxR: 5,
+            propagationSpeed: 2,
+            repeatPeriod: 2000,
+            color: '#FFD700'
+        });
+    }
+
+    return rings;
+  }, [data, userLocation]);
 
   return (
     <div className="flex flex-col md:flex-row h-full w-full relative">
@@ -145,7 +185,6 @@ export const ISSTracker: React.FC = () => {
              <RotateCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
            </button>
            
-           {/* New Orbital Data Toggle */}
            <button
              onClick={() => {
                  terminalAudio.playClick();
@@ -170,12 +209,23 @@ export const ISSTracker: React.FC = () => {
             }} 
           />
         )}
+        
+        {/* Flyover Control Panel */}
+        <FlyoverControl />
 
         {predictedPath.length > 0 && (
           <div className="absolute top-4 right-4 z-10 pointer-events-none">
-            <div className="flex items-center gap-2 text-[10px] text-matrix-dim bg-black/50 p-1 border border-matrix-dim/30">
-              <span className="w-3 h-0.5 bg-[#00FF41] opacity-50 border-t border-b border-black"></span>
-              <span>ORBITAL_PATH (TLE_PROJECTION)</span>
+            <div className="flex flex-col items-end gap-1">
+                <div className="flex items-center gap-2 text-[10px] text-matrix-dim bg-black/50 p-1 border border-matrix-dim/30">
+                <span className="w-3 h-0.5 bg-[#00FF41] opacity-50 border-t border-b border-black"></span>
+                <span>ORBITAL_PATH (TLE_PROJECTION)</span>
+                </div>
+                {nextPass && (
+                    <div className="flex items-center gap-2 text-[10px] text-yellow-500 bg-black/50 p-1 border border-yellow-900/50">
+                    <span className="w-3 h-0.5 bg-yellow-500 border-t border-b border-black"></span>
+                    <span>FLYOVER_ARC</span>
+                    </div>
+                )}
             </div>
           </div>
         )}
@@ -210,7 +260,7 @@ export const ISSTracker: React.FC = () => {
           pointPulseBtn={0.5}
           
           ringsData={ringsData}
-          ringColor={() => '#00FF41'}
+          ringColor="color"
           ringMaxRadius="maxR"
           ringPropagationSpeed="propagationSpeed"
           ringRepeatPeriod="repeatPeriod"
@@ -219,7 +269,11 @@ export const ISSTracker: React.FC = () => {
           pathPointLat={(p: any) => p.lat}
           pathPointLng={(p: any) => p.lng}
           pathPointAlt={0.1}
-          pathColor={(path: any) => path === predictedPath ? 'rgba(0, 255, 65, 0.5)' : '#00FF41'}
+          pathColor={(path: any) => {
+              if (path === nextPass?.path) return '#FFD700'; // Gold for flyover
+              if (path === predictedPath) return 'rgba(0, 255, 65, 0.5)';
+              return '#00FF41';
+          }}
           pathDashLength={(path: any) => path === predictedPath ? 0.5 : 0.05}
           pathDashGap={(path: any) => path === predictedPath ? 0.2 : 0}
           pathDashAnimateTime={(path: any) => path === predictedPath ? 0 : 20000}
@@ -232,7 +286,6 @@ export const ISSTracker: React.FC = () => {
 
       <div className="w-full md:w-80 lg:w-96 flex-none flex flex-col h-[40vh] md:h-auto border-t md:border-t-0 border-matrix-dim overflow-y-auto custom-scrollbar bg-matrix-bg">
         <StatsPanel data={data} isLoading={isLoading} />
-        {/* Orbital Solver removed from sidebar to be a modal */}
         <div className="p-4 border-t border-matrix-dim/30 text-center opacity-50 hover:opacity-100 transition-opacity">
            <div className="text-[10px] text-matrix-dim mb-2">ADDITIONAL MODULES</div>
            <div className="grid grid-cols-3 gap-2">

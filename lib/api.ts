@@ -1,4 +1,4 @@
-import { ISSPosition, CrewData, Astronaut } from '../types';
+import { ISSPosition, CrewData, Astronaut, PassPrediction, LatLng } from '../types';
 // @ts-ignore
 import * as satellite from 'satellite.js';
 
@@ -21,19 +21,16 @@ const FALLBACK_TLE = [
 ];
 
 // --- MISSION DATABASE (Local Lookup) ---
-// Used strictly to attach Images/Dates to names returned by Open Notify.
 interface MissionProfile {
   start?: string; 
   end?: string;
   role: string;
   agency?: string;
   image?: string;
-  aliasFor?: string; // Pointer to another record to handle name variations
+  aliasFor?: string; 
 }
 
 const MISSION_DB: Record<string, MissionProfile> = {
-  // --- KNOWN ACTIVE CREW ---
-  
   // Starliner (Extended Stay)
   "Sunita Williams": { 
     start: "2024-06-05", 
@@ -42,7 +39,6 @@ const MISSION_DB: Record<string, MissionProfile> = {
     image: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a6/Sunita_Williams_official_portrait_2018.jpg/480px-Sunita_Williams_official_portrait_2018.jpg"
   },
   "Suni Williams": { aliasFor: "Sunita Williams", role: "", agency: "" },
-
   "Barry Wilmore": { 
     start: "2024-06-05", 
     role: "Pilot", 
@@ -73,14 +69,12 @@ const MISSION_DB: Record<string, MissionProfile> = {
     image: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/Donald_Pettit_official_portrait_2011.jpg/480px-Donald_Pettit_official_portrait_2011.jpg"
   },
   "Don Pettit": { aliasFor: "Donald Pettit", role: "", agency: "" },
-
   "Alexey Ovchinin": { 
     start: "2024-09-11", 
     role: "Commander", 
     agency: "Roscosmos", 
     image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8e/Alexey_Ovchinin_official_portrait.jpg/480px-Alexey_Ovchinin_official_portrait.jpg"
   },
-  
   "Ivan Vagner": { 
     start: "2024-09-11", 
     role: "Flight Engineer", 
@@ -88,12 +82,9 @@ const MISSION_DB: Record<string, MissionProfile> = {
     image: "https://upload.wikimedia.org/wikipedia/commons/thumb/6/68/Ivan_Vagner_official_portrait.jpg/480px-Ivan_Vagner_official_portrait.jpg"
   },
 
-  // --- RECENTLY RETURNED (BUT IF THEY APPEAR IN FEED, THEY ARE ACTIVE) ---
-  // We keep the metadata here so if the API sends them, we have their picture.
-  
   // Soyuz MS-25
   "Oleg Kononenko": { 
-    start: "2023-09-15", // Launch date
+    start: "2023-09-15",
     role: "Commander", 
     agency: "Roscosmos", 
     image: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/Oleg_Kononenko_official_portrait_2011.jpg/480px-Oleg_Kononenko_official_portrait_2011.jpg" 
@@ -122,6 +113,17 @@ const MISSION_DB: Record<string, MissionProfile> = {
 const isValidNumber = (n: any): boolean => typeof n === 'number' && !isNaN(n) && isFinite(n);
 const normalizeLongitude = (lon: number): number => ((lon + 180) % 360 + 360) % 360 - 180;
 
+// Helper: Get Satellite Library safely
+const getSatelliteLib = () => {
+    // Handle various import scenarios for satellite.js (ESM/CommonJS/Bundled)
+    const lib = (satellite as any).default || satellite;
+    if (!lib || !lib.twoline2satrec) {
+        console.warn("Satellite.js library not loaded correctly", lib);
+        throw new Error("ORBITAL_LIB_ERROR");
+    }
+    return lib;
+};
+
 // Helper: Find profile in DB
 const findMissionProfile = (name: string): MissionProfile | undefined => {
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, '').trim();
@@ -142,7 +144,6 @@ const findMissionProfile = (name: string): MissionProfile | undefined => {
 
   const fallbackKey = dbKeys.find(k => {
     const nKey = normalize(k);
-    // Matches last name AND shares some part of first name (e.g. "Don" in "Donald")
     return nKey.includes(searchLast) && (nKey.includes(searchName) || searchName.includes(nKey));
   });
 
@@ -190,17 +191,12 @@ export const fetchISSPosition = async (): Promise<ISSPosition> => {
 
 export const fetchCrewData = async (): Promise<CrewData> => {
   try {
-    // 1. Fetch Basic List (THE SOURCE OF TRUTH)
     const basicResponse = await fetch(`${PROXY_URL}${encodeURIComponent(CREW_API)}`);
     if (!basicResponse.ok) throw new Error('Basic crew fetch failed');
     const basicData = await basicResponse.json();
     
-    // Filter only ISS crew
     const issCrew = (basicData.people || []).filter((p: any) => p.craft === 'ISS');
     
-    // 2. Map & Enrich
-    // We do NOT fetch external APIs here. We strictly use the local DB 
-    // to find an image for the name provided by Open Notify.
     const enrichedCrew = issCrew.map((basicAstronaut: any) => {
        const dbData = findMissionProfile(basicAstronaut.name);
 
@@ -230,7 +226,6 @@ export const fetchCrewData = async (): Promise<CrewData> => {
   }
 };
 
-// ... TLE Logic (Unchanged) ...
 const fetchTLEFromUrl = async (url: string): Promise<[string, string]> => {
   try {
     const response = await fetch(url);
@@ -270,7 +265,7 @@ export const fetchTLE = async (): Promise<[string, string]> => {
 export const calculateOrbitPath = (line1: string, line2: string, startMins: number, endMins: number, stepMins: number = 1) => {
   const points = [];
   try {
-    const satLib = (satellite as any).default || satellite;
+    const satLib = getSatelliteLib();
     const satrec = satLib.twoline2satrec(line1, line2);
     if (!satrec) return [];
     const now = new Date();
@@ -301,7 +296,7 @@ export const formatCoordinate = (val: number, type: 'lat' | 'lon'): string => {
 
 export const calculateOrbitalParameters = (line1: string, line2: string) => {
   try {
-    const satLib = (satellite as any).default || satellite;
+    const satLib = getSatelliteLib();
     const satrec = satLib.twoline2satrec(line1, line2);
     if (!satrec) return null;
     const n_rad_s = satrec.no / 60;
@@ -316,6 +311,78 @@ export const calculateOrbitalParameters = (line1: string, line2: string) => {
       perigee: (a * (1 - satrec.ecco)) - 6378.137
     };
   } catch (e) {
+    return null;
+  }
+};
+
+export const predictNextPass = (line1: string, line2: string, userLoc: LatLng): PassPrediction | null => {
+  try {
+    const satLib = getSatelliteLib();
+    const satrec = satLib.twoline2satrec(line1, line2);
+    
+    // Observer
+    const observerGd = {
+      latitude: satLib.degreesToRadians(userLoc.lat),
+      longitude: satLib.degreesToRadians(userLoc.lng),
+      height: 0.03 
+    };
+
+    const now = new Date();
+    const stepSeconds = 20; 
+    const maxHorizon = 24 * 60 * 60 * 1000; 
+    let t = 0;
+    
+    let passStart: Date | null = null;
+    let maxEl = 0;
+    let passPath: { lat: number; lng: number; alt: number }[] = [];
+
+    while (t < maxHorizon) {
+      const time = new Date(now.getTime() + t);
+      
+      const posEci = satLib.propagate(satrec, time).position;
+      const gmst = satLib.gstime(time);
+      
+      if (!posEci || typeof posEci === 'boolean') {
+          t += stepSeconds * 1000;
+          continue;
+      }
+
+      const posEcf = satLib.eciToEcf(posEci, gmst);
+      const look = satLib.ecfToLookAngles(observerGd, posEcf);
+      
+      const elevationDeg = satLib.radiansToDegrees(look.elevation);
+
+      if (elevationDeg > 10) {
+        if (!passStart) {
+          passStart = time;
+          passPath = [];
+        }
+        
+        if (elevationDeg > maxEl) maxEl = elevationDeg;
+
+        const geo = satLib.eciToGeodetic(posEci, gmst);
+        passPath.push({
+            lat: satLib.degreesLat(geo.latitude),
+            lng: normalizeLongitude(satLib.degreesLong(geo.longitude)),
+            alt: geo.height
+        });
+
+      } else if (passStart) {
+        return {
+          startTime: passStart,
+          endTime: time,
+          duration: (time.getTime() - passStart.getTime()) / 1000 / 60,
+          maxElevation: maxEl,
+          path: passPath
+        };
+      }
+      
+      t += stepSeconds * 1000;
+    }
+    
+    return null; 
+  } catch (e) {
+    console.error("Pass prediction error", e);
     return null;
   }
 };

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchISSPosition, fetchTLE, calculateOrbitPath } from '../lib/api';
 import { StatsPanel } from '../components/StatsPanel';
+import { FlyoverControl } from '../components/FlyoverControl';
+import { useLocationContext } from '../context/LocationContext';
 
 const MAP_IMAGE_URL = "https://upload.wikimedia.org/wikipedia/commons/e/ec/World_map_blank_without_borders.svg";
 
@@ -18,6 +20,7 @@ export const MapView: React.FC = () => {
     staleTime: 1000 * 60 * 60,
   });
 
+  const { userLocation, nextPass } = useLocationContext();
   const [mapError, setMapError] = useState(false);
 
   // Robust Coordinate Helper
@@ -77,6 +80,12 @@ export const MapView: React.FC = () => {
     return { historySegments: histSegments, predictedSegments: predSegments };
   }, [tleData]);
 
+  // Pass Path Segments
+  const passSegments = useMemo(() => {
+      if (!nextPass || !nextPass.path) return [];
+      return createSafePathSegments(nextPass.path);
+  }, [nextPass]);
+
   // Safe current position
   const currentPos = useMemo(() => {
     if (data && typeof data.latitude === 'number' && typeof data.longitude === 'number' && !isNaN(data.latitude)) {
@@ -85,9 +94,19 @@ export const MapView: React.FC = () => {
     return null;
   }, [data]);
 
+  // User position XY
+  const userPos = useMemo(() => {
+    if (userLocation) {
+        return getXY(userLocation.lat, userLocation.lng);
+    }
+    return null;
+  }, [userLocation]);
+
   return (
     <div className="flex flex-col md:flex-row h-full w-full">
       <div className="flex-1 bg-matrix-bg relative overflow-hidden border-r border-matrix-dim flex items-center justify-center p-4">
+
+        <FlyoverControl />
 
         <div className="absolute inset-0 z-0 pointer-events-none" style={{
             backgroundImage: 'linear-gradient(rgba(0, 255, 65, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 255, 65, 0.05) 1px, transparent 1px)',
@@ -101,7 +120,6 @@ export const MapView: React.FC = () => {
               src={MAP_IMAGE_URL} 
               alt="World Map" 
               onError={() => setMapError(true)}
-              // Changed object-cover to w-full h-full to force perfect alignment with the 2:1 coordinate system
               className="absolute inset-0 w-full h-full select-none pointer-events-none"
               style={{ 
                 filter: 'sepia(1) saturate(5) hue-rotate(70deg) brightness(0.6) contrast(1.2)',
@@ -144,6 +162,29 @@ export const MapView: React.FC = () => {
               />
             ))}
 
+            {/* Flyover Arc */}
+            {passSegments.map((points, i) => (
+              <polyline
+                key={`pass-${i}`}
+                points={points}
+                fill="none"
+                stroke="#FFD700" // Gold
+                strokeWidth="0.6" 
+                strokeLinecap="round"
+                className="drop-shadow-[0_0_2px_#FFD700]"
+              />
+            ))}
+
+            {/* User Location Reticle */}
+            {userPos && userPos.x !== -999 && (
+               <g transform={`translate(${userPos.x}, ${userPos.y})`}>
+                 <circle r="0.5" fill="#FFD700" />
+                 <line x1="-2" y1="0" x2="2" y2="0" stroke="#FFD700" strokeWidth="0.2" />
+                 <line x1="0" y1="-2" x2="0" y2="2" stroke="#FFD700" strokeWidth="0.2" />
+                 <circle r="2" fill="none" stroke="#FFD700" strokeWidth="0.1" strokeDasharray="0.5 0.5" className="animate-spin-slow" />
+               </g>
+            )}
+
             {currentPos && currentPos.x !== -999 && (
               <g transform={`translate(${currentPos.x}, ${currentPos.y})`}>
                 <circle r="1.5" fill="none" stroke="#00FF41" strokeWidth="0.1" className="opacity-0">
@@ -164,9 +205,9 @@ export const MapView: React.FC = () => {
             </div>
           )}
 
-          {predictedSegments.length > 0 && (
-             <div className="absolute bottom-2 left-2 font-mono text-[8px] text-matrix-dim/70 z-20">
-                -- -- PREDICTED PATH
+          {passSegments.length > 0 && (
+             <div className="absolute bottom-2 left-2 font-mono text-[8px] text-yellow-500 z-20 bg-black/50 p-1 border border-yellow-900/50">
+                -- -- FLYOVER ARC ACQUIRED
              </div>
           )}
         </div>

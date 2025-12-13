@@ -18,6 +18,7 @@ import { ISSTracker } from './routes/Dashboard';
 import { CrewManifest } from './routes/Crew';
 import { MapView } from './routes/MapRoute';
 import { terminalAudio } from './lib/audio';
+import { LocationProvider } from './context/LocationContext';
 
 // -- Query Client Setup --
 const queryClient = new QueryClient({
@@ -247,7 +248,9 @@ const router = createRouter({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <LocationProvider>
+        <RouterProvider router={router} />
+      </LocationProvider>
     </QueryClientProvider>
   );
 }

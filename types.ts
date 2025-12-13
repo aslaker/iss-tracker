@@ -41,3 +41,16 @@ export interface GeoLocation {
   region?: string;
   isOverWater: boolean;
 }
+
+export interface LatLng {
+  lat: number;
+  lng: number;
+}
+
+export interface PassPrediction {
+  startTime: Date;
+  endTime: Date;
+  maxElevation: number;
+  duration: number; // minutes
+  path: { lat: number; lng: number; alt: number }[]; // The specific arc of the pass
+}
