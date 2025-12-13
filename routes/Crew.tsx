@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCrewData } from '../lib/api';
-import { Rocket, UserCircle, Calendar, Clock, AlertTriangle, BadgeCheck, Network, Radio } from 'lucide-react';
+import { Rocket, UserCircle, Calendar, Clock, BadgeCheck, Network } from 'lucide-react';
 import { MatrixText } from '../components/MatrixText';
 import { Astronaut } from '../types';
 
@@ -9,24 +9,22 @@ import { Astronaut } from '../types';
 const getMissionStats = (person: Astronaut) => {
   const { launchDate, endDate, role } = person;
 
-  // Defaults if no data
+  // 1. Missing Date (Unknown Status)
   if (!launchDate) {
     return {
       role: role || "Flight Engineer",
-      daysInOrbit: "???",
+      daysInOrbit: "N/A",
       progress: 0,
-      startStr: "CLASSIFIED",
+      startStr: "UNKNOWN",
       endStr: "UNKNOWN",
       isUnknown: true
     };
   }
 
+  // 2. Active Mission
   const start = new Date(launchDate).getTime();
   const now = Date.now();
   
-  // Determine end date:
-  // 1. Explicit end date from DB (e.g. for known return dates)
-  // 2. Default standard duration (180 days)
   let end: number;
   let isEstimatedEnd = true;
 
@@ -41,10 +39,7 @@ const getMissionStats = (person: Astronaut) => {
   const elapsed = now - start;
   const totalDuration = end - start;
   
-  // Calculate days
   const daysInOrbit = Math.floor(elapsed / (1000 * 60 * 60 * 24));
-  
-  // Calculate percentage (clamped 0-100)
   const progress = Math.min(100, Math.max(0, (elapsed / totalDuration) * 100));
 
   return {
@@ -97,7 +92,7 @@ export const CrewManifest: React.FC = () => {
             </h2>
             <p className="text-matrix-dim text-sm uppercase flex items-center gap-2">
               <span className="w-2 h-2 bg-matrix-dim rounded-full animate-pulse"></span>
-              Live Uplink // The Space Devs Network
+              Live Uplink // Open Notify API
             </p>
           </div>
           <div className="flex gap-8 text-right bg-matrix-dark/50 p-2 border border-matrix-dim/30">
@@ -170,7 +165,7 @@ export const CrewManifest: React.FC = () => {
                             ) : (
                                 <Network className="w-3 h-3" />
                             )}
-                            <span className="uppercase">{person.image ? 'VERIFIED_ID' : 'NO_VISUAL'}</span>
+                            <span className="uppercase">{person.image ? 'VERIFIED_ID' : 'NO_IMAGE'}</span>
                         </div>
                       </div>
                     </div>
@@ -180,13 +175,13 @@ export const CrewManifest: React.FC = () => {
                   <div className="bg-black/40 border border-matrix-dim/30 p-3 relative z-10 min-h-[100px] flex flex-col justify-center">
                     {stats.isUnknown ? (
                         <div className="flex flex-col items-center justify-center py-2 text-matrix-dim/60 gap-1 text-center">
-                            <Radio className="w-5 h-5 opacity-50 mb-1" />
+                            <Network className="w-5 h-5 opacity-50 mb-1" />
                             <div className="text-xs font-bold tracking-widest text-matrix-text/70 uppercase">
-                                STATUS: MISSION CONCLUDED
+                                STATUS: ACTIVE
                             </div>
                             <div className="text-[9px] uppercase tracking-wider opacity-60">
-                                Crew member has likely returned to Earth.<br/>
-                                Telemetry stream inactive.
+                                DATA STREAM LIMITED<br/>
+                                CONFIRMED ONBOARD
                             </div>
                         </div>
                     ) : (
@@ -242,13 +237,13 @@ export const CrewManifest: React.FC = () => {
 
         <div className="mt-12 p-4 border border-matrix-dim border-dashed bg-matrix-dark/30 text-xs text-matrix-dim font-mono flex flex-col md:flex-row justify-between gap-4">
           <div className="space-y-1">
-            <p>> DATA_FUSION: OPEN_NOTIFY (MANIFEST) + LAUNCH_LIBRARY_2 (METADATA)</p>
-            <p>> FILTER_MODE: ISS_ONLY // ACTIVE_STATUS</p>
+            <p>> DATA_SOURCE: OPEN_NOTIFY (LIVE_FEED)</p>
+            <p>> FILTER_MODE: ISS_ONLY</p>
             <p>> CACHE_STATUS: {isLoading ? 'REFRESHING' : 'VALID'}</p>
           </div>
           <div className="text-right opacity-50">
              <p>PERSONNEL_TRACKING_SYSTEM</p>
-             <p>SECURE_LINK // TSD_API_V2.2.0</p>
+             <p>SECURE_LINK // TERMINAL_V2</p>
           </div>
         </div>
       </div>
