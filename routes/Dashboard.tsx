@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchISSPosition, fetchTLE, calculateOrbitPath } from '../lib/api';
 import { StatsPanel } from '../components/StatsPanel';
 import { Minimize, RotateCw } from 'lucide-react';
+import { terminalAudio } from '../lib/audio';
 
 export const ISSTracker: React.FC = () => {
   const globeEl = useRef<GlobeMethods | undefined>(undefined);
@@ -117,17 +118,23 @@ export const ISSTracker: React.FC = () => {
         <div className="absolute top-4 left-4 z-10 flex gap-2">
            <button
              onClick={() => {
+               terminalAudio.playClick();
                if(data && !isNaN(data.latitude) && !isNaN(data.longitude)) {
                  globeEl.current?.pointOfView({ lat: data.latitude, lng: data.longitude, altitude: 1.8 }, 1000)
                }
              }}
+             onMouseEnter={() => terminalAudio.playHover()}
              className="bg-matrix-dark/80 border border-matrix-dim text-matrix-text p-2 hover:bg-matrix-dim/20 transition"
              title="Re-center ISS"
            >
              <Minimize className="w-4 h-4" />
            </button>
            <button
-             onClick={() => globeEl.current?.pointOfView({ lat: 0, lng: 0, altitude: 2.5 }, 1000)}
+             onClick={() => {
+                 terminalAudio.playClick();
+                 globeEl.current?.pointOfView({ lat: 0, lng: 0, altitude: 2.5 }, 1000);
+             }}
+             onMouseEnter={() => terminalAudio.playHover()}
              className="bg-matrix-dark/80 border border-matrix-dim text-matrix-text p-2 hover:bg-matrix-dim/20 transition"
              title="Reset View"
            >
