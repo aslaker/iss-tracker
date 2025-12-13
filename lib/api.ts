@@ -29,7 +29,7 @@ const FALLBACK_TLE = [
 // --- MISSION DATABASE (Local Fallback) ---
 // Used when Live API is rate-limited, data is missing, or for hardcoded high-quality overrides.
 interface MissionProfile {
-  start: string;
+  start?: string; // Optional: If missing, implies mission concluded/inactive
   end?: string;
   role: string;
   agency?: string;
@@ -63,7 +63,7 @@ const MISSION_DB: Record<string, MissionProfile> = {
     image: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Alexander_Grebenkin_official_portrait.jpg/480px-Alexander_Grebenkin_official_portrait.jpg"
   },
 
-  // Starliner CFT (Explicit Aliases for reliability)
+  // Starliner CFT
   "Barry Wilmore": { 
     start: "2024-06-05", 
     role: "Commander", 
@@ -127,6 +127,30 @@ const MISSION_DB: Record<string, MissionProfile> = {
     role: "Mission Specialist", 
     agency: "Roscosmos",
     image: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Aleksandr_Gorbunov_official_portrait.jpg/480px-Aleksandr_Gorbunov_official_portrait.jpg"
+  },
+
+  // Legacy/Stale Crew 
+  // We include them to ensure IMAGES exist, but we deliberately omit 'start' 
+  // to allow the UI to infer "Mission Concluded".
+  "Oleg Kononenko": {
+      role: "Commander",
+      agency: "Roscosmos",
+      image: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/Oleg_Kononenko_official_portrait_2011.jpg/480px-Oleg_Kononenko_official_portrait_2011.jpg"
+  },
+  "Nikolai Chub": {
+      role: "Flight Engineer",
+      agency: "Roscosmos",
+      image: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/Nikolai_Chub_official_portrait.jpg/480px-Nikolai_Chub_official_portrait.jpg"
+  },
+  "Tracy Caldwell Dyson": {
+      role: "Flight Engineer",
+      agency: "NASA",
+      image: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Tracy_Caldwell_Dyson_official_portrait_2010.jpg/480px-Tracy_Caldwell_Dyson_official_portrait_2010.jpg"
+  },
+  "Tracy Dyson": {
+      role: "Flight Engineer",
+      agency: "NASA",
+      image: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Tracy_Caldwell_Dyson_official_portrait_2010.jpg/480px-Tracy_Caldwell_Dyson_official_portrait_2010.jpg"
   }
 };
 
@@ -254,32 +278,23 @@ export const fetchCrewData = async (): Promise<CrewData> => {
        }
 
        // --- MERGE STRATEGY ---
-       // 1. Start with Basic Open Notify Data
-       // 2. Enhance with Live API if available
-       // 3. Fallback/Override with Local DB for critical missing pieces
-
-       // IMAGE PRIORITY: Live API > Local DB > Placeholder
-       // User Request: "Merge image... enhance what we have". 
-       // We prefer the Live API image if it exists (restoring the "images we had before"),
-       // but fallback to DB if the API fails or has no image.
+       // 1. IMAGES: Live API > Local DB
+       // We prioritize the Live API image if available, otherwise fall back to DB.
        const image = liveData?.profile_image || liveData?.profile_image_thumbnail || dbData?.image;
 
-       // DATE PRIORITY: Local DB > Live API
-       // User Request: "The data [launch dates] is back [with DB]".
-       // Live API dates are often missing for active missions or require complex parsing.
-       // DB dates are manually curated and reliable.
+       // 2. DATES: Trust DB first.
+       // If DB entry exists (even with missing date), we use it.
+       // We only fallback to Live API date if the astronaut is NOT in our DB at all.
        let launchDate = dbData?.start;
        
-       // If DB date is missing, try to extract from Live Data
-       if (!launchDate && liveData) {
+       if (!dbData && !launchDate && liveData) {
          const flights = (liveData.flights || []).sort((a: any, b: any) => 
              new Date(b.window_start || 0).getTime() - new Date(a.window_start || 0).getTime()
          );
          launchDate = flights[0]?.window_start;
        }
 
-       // ROLE/AGENCY PRIORITY: Live API > Local DB
-       // Live API usually has accurate current roles/agencies.
+       // 3. METADATA: Merge Live API into DB defaults
        const role = liveData?.type?.name || dbData?.role || "Astronaut";
        const agency = liveData?.agency?.name || dbData?.agency;
        const bio = liveData?.bio || "No biography available via secure uplink.";

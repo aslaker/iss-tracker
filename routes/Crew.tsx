@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCrewData } from '../lib/api';
-import { User, Rocket, UserCircle, Calendar, Clock, AlertTriangle, BadgeCheck, Network } from 'lucide-react';
+import { Rocket, UserCircle, Calendar, Clock, AlertTriangle, BadgeCheck, Network, Radio } from 'lucide-react';
 import { MatrixText } from '../components/MatrixText';
 import { Astronaut } from '../types';
 
@@ -177,11 +177,17 @@ export const CrewManifest: React.FC = () => {
                   </div>
 
                   {/* Timeline Section */}
-                  <div className="bg-black/40 border border-matrix-dim/30 p-3 relative z-10">
+                  <div className="bg-black/40 border border-matrix-dim/30 p-3 relative z-10 min-h-[100px] flex flex-col justify-center">
                     {stats.isUnknown ? (
-                        <div className="flex flex-col items-center justify-center py-4 text-matrix-alert/70 gap-2">
-                            <AlertTriangle className="w-6 h-6 animate-pulse" />
-                            <span className="text-xs font-mono tracking-widest uppercase">Mission Start Data Unavailable</span>
+                        <div className="flex flex-col items-center justify-center py-2 text-matrix-dim/60 gap-1 text-center">
+                            <Radio className="w-5 h-5 opacity-50 mb-1" />
+                            <div className="text-xs font-bold tracking-widest text-matrix-text/70 uppercase">
+                                STATUS: MISSION CONCLUDED
+                            </div>
+                            <div className="text-[9px] uppercase tracking-wider opacity-60">
+                                Crew member has likely returned to Earth.<br/>
+                                Telemetry stream inactive.
+                            </div>
                         </div>
                     ) : (
                         <>
