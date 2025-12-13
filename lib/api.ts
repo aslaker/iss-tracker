@@ -11,7 +11,10 @@ const CREW_API = 'http://api.open-notify.org/astros.json';
 const PROXY_URL = 'https://api.allorigins.win/raw?url=';
 
 // The Space Devs API (Launch Library 2)
-const LL2_API_ASTRONAUTS = 'https://ll.thespacedevs.com/2.2.0/astronaut/?status=1&limit=50';
+// Configurable base URL for Development vs Production
+// Production: 'https://ll.thespacedevs.com/2.2.0' (Strict Rate Limits)
+// Development: 'https://lldev.thespacedevs.com/2.2.0' (Stale data, lenient limits)
+const SPACE_DEVS_BASE_URL = 'https://lldev.thespacedevs.com/2.2.0';
 
 // TLE Sources
 const TLE_API_PRIMARY = 'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE';
@@ -24,38 +27,107 @@ const FALLBACK_TLE = [
 ];
 
 // --- MISSION DATABASE (Local Fallback) ---
-// Used when Live API is rate-limited or data is missing.
+// Used when Live API is rate-limited, data is missing, or for hardcoded high-quality overrides.
 interface MissionProfile {
   start: string;
   end?: string;
   role: string;
   agency?: string;
+  image?: string;
 }
 
 const MISSION_DB: Record<string, MissionProfile> = {
   // Crew-8
-  "Matthew Dominick": { start: "2024-03-04", role: "Commander", agency: "NASA" },
-  "Michael Barratt": { start: "2024-03-04", role: "Pilot", agency: "NASA" },
-  "Jeanette Epps": { start: "2024-03-04", role: "Mission Specialist", agency: "NASA" },
-  "Alexander Grebenkin": { start: "2024-03-04", role: "Flight Engineer", agency: "Roscosmos" },
+  "Matthew Dominick": { 
+    start: "2024-03-04", 
+    role: "Commander", 
+    agency: "NASA",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/6/66/Matthew_Dominick_official_portrait.jpg/480px-Matthew_Dominick_official_portrait.jpg"
+  },
+  "Michael Barratt": { 
+    start: "2024-03-04", 
+    role: "Pilot", 
+    agency: "NASA",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/75/Michael_Reed_Barratt_v2.jpg/480px-Michael_Reed_Barratt_v2.jpg"
+  },
+  "Jeanette Epps": { 
+    start: "2024-03-04", 
+    role: "Mission Specialist", 
+    agency: "NASA",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/Jeanette_Epps_official_portrait_2016.jpg/480px-Jeanette_Epps_official_portrait_2016.jpg"
+  },
+  "Alexander Grebenkin": { 
+    start: "2024-03-04", 
+    role: "Flight Engineer", 
+    agency: "Roscosmos",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Alexander_Grebenkin_official_portrait.jpg/480px-Alexander_Grebenkin_official_portrait.jpg"
+  },
 
-  // Soyuz MS-25
-  "Tracy Caldwell Dyson": { start: "2024-03-23", end: "2024-09-23", role: "Flight Engineer", agency: "NASA" },
-  "Oleg Kononenko": { start: "2023-09-15", end: "2024-09-23", role: "Commander", agency: "Roscosmos" },
-  "Nikolai Chub": { start: "2023-09-15", end: "2024-09-23", role: "Flight Engineer", agency: "Roscosmos" },
-
-  // Starliner CFT (Extended Stay)
-  "Barry Wilmore": { start: "2024-06-05", role: "Commander", agency: "NASA" },
-  "Sunita Williams": { start: "2024-06-05", role: "Pilot", agency: "NASA" },
+  // Starliner CFT (Explicit Aliases for reliability)
+  "Barry Wilmore": { 
+    start: "2024-06-05", 
+    role: "Commander", 
+    agency: "NASA",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3b/Barry_Wilmore_official_portrait_2014.jpg/480px-Barry_Wilmore_official_portrait_2014.jpg"
+  },
+  "Butch Wilmore": { 
+    start: "2024-06-05", 
+    role: "Commander", 
+    agency: "NASA",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3b/Barry_Wilmore_official_portrait_2014.jpg/480px-Barry_Wilmore_official_portrait_2014.jpg"
+  },
+  "Sunita Williams": { 
+    start: "2024-06-05", 
+    role: "Pilot", 
+    agency: "NASA",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a6/Sunita_Williams_official_portrait_2018.jpg/480px-Sunita_Williams_official_portrait_2018.jpg"
+  },
+  "Suni Williams": { 
+    start: "2024-06-05", 
+    role: "Pilot", 
+    agency: "NASA",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a6/Sunita_Williams_official_portrait_2018.jpg/480px-Sunita_Williams_official_portrait_2018.jpg"
+  },
 
   // Soyuz MS-26
-  "Donald Pettit": { start: "2024-09-11", role: "Flight Engineer", agency: "NASA" },
-  "Alexey Ovchinin": { start: "2024-09-11", role: "Commander", agency: "Roscosmos" },
-  "Ivan Vagner": { start: "2024-09-11", role: "Flight Engineer", agency: "Roscosmos" },
+  "Donald Pettit": { 
+    start: "2024-09-11", 
+    role: "Flight Engineer", 
+    agency: "NASA",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/Donald_Pettit_official_portrait_2011.jpg/480px-Donald_Pettit_official_portrait_2011.jpg"
+  },
+  "Don Pettit": { 
+    start: "2024-09-11", 
+    role: "Flight Engineer", 
+    agency: "NASA",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/Donald_Pettit_official_portrait_2011.jpg/480px-Donald_Pettit_official_portrait_2011.jpg"
+  },
+  "Alexey Ovchinin": { 
+    start: "2024-09-11", 
+    role: "Commander", 
+    agency: "Roscosmos",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8e/Alexey_Ovchinin_official_portrait.jpg/480px-Alexey_Ovchinin_official_portrait.jpg"
+  },
+  "Ivan Vagner": { 
+    start: "2024-09-11", 
+    role: "Flight Engineer", 
+    agency: "Roscosmos",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/6/68/Ivan_Vagner_official_portrait.jpg/480px-Ivan_Vagner_official_portrait.jpg"
+  },
   
   // Crew-9
-  "Nick Hague": { start: "2024-09-28", role: "Commander", agency: "NASA" },
-  "Aleksandr Gorbunov": { start: "2024-09-28", role: "Mission Specialist", agency: "Roscosmos" }
+  "Nick Hague": { 
+    start: "2024-09-28", 
+    role: "Commander", 
+    agency: "NASA",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4c/Nick_Hague_official_portrait_2016.jpg/480px-Nick_Hague_official_portrait_2016.jpg"
+  },
+  "Aleksandr Gorbunov": { 
+    start: "2024-09-28", 
+    role: "Mission Specialist", 
+    agency: "Roscosmos",
+    image: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Aleksandr_Gorbunov_official_portrait.jpg/480px-Aleksandr_Gorbunov_official_portrait.jpg"
+  }
 };
 
 // Helper: Strict number validation
@@ -64,6 +136,39 @@ const isValidNumber = (n: any): boolean => typeof n === 'number' && !isNaN(n) &&
 // Helper: Normalize Longitude to -180 to +180
 const normalizeLongitude = (lon: number): number => {
   return ((lon + 180) % 360 + 360) % 360 - 180;
+};
+
+// Helper: Fuzzy name matching
+const findMissionProfile = (name: string): MissionProfile | undefined => {
+  // Remove punctuation and extra spaces, convert to lowercase
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, '').trim();
+  const searchName = normalize(name);
+  const searchParts = searchName.split(' ');
+  const searchLast = searchParts[searchParts.length - 1]; // Use surname for fallback
+
+  const dbKeys = Object.keys(MISSION_DB);
+
+  // 1. Exact Match (Normalized)
+  const exactMatch = dbKeys.find(k => normalize(k) === searchName);
+  if (exactMatch) return MISSION_DB[exactMatch];
+
+  // 2. Containment Match (e.g. "Don" in "Donald")
+  const containmentMatch = dbKeys.find(k => {
+    const nKey = normalize(k);
+    return nKey.includes(searchName) || searchName.includes(nKey);
+  });
+  if (containmentMatch) return MISSION_DB[containmentMatch];
+
+  // 3. Last Name Match (Robust Fallback)
+  // This catches "Don Pettit" <-> "Donald Pettit"
+  const lastNameMatch = dbKeys.find(k => {
+    const kParts = normalize(k).split(' ');
+    const kLast = kParts[kParts.length - 1];
+    return kLast === searchLast;
+  });
+  if (lastNameMatch) return MISSION_DB[lastNameMatch];
+
+  return undefined;
 };
 
 export const fetchISSPosition = async (): Promise<ISSPosition> => {
@@ -115,64 +220,82 @@ export const fetchISSPosition = async (): Promise<ISSPosition> => {
 
 export const fetchCrewData = async (): Promise<CrewData> => {
   try {
-    // 1. Fetch Basic List (Authoritative)
+    // 1. Fetch Basic List (Authoritative source for who is currently on board)
     const basicResponse = await fetch(`${PROXY_URL}${encodeURIComponent(CREW_API)}`);
     if (!basicResponse.ok) throw new Error('Basic crew fetch failed');
     const basicData = await basicResponse.json();
     
     // Filter only ISS crew
     const issCrew = (basicData.people || []).filter((p: any) => p.craft === 'ISS');
-    let richAstronauts: any[] = [];
+    
+    // 2. Enrich Data using Parallel Search
+    const enrichedCrewPromises = issCrew.map(async (basicAstronaut: any) => {
+       const name = basicAstronaut.name;
+       
+       // A. Try Local DB first (Instant, High Reliability for known crew, best images)
+       const dbData = findMissionProfile(name);
+       
+       // B. Try Live API Search (Dynamic, covers new crew not in DB)
+       let liveData = null;
+       try {
+         // Search specifically for this astronaut
+         // This bypasses the "limit=50" pagination issue
+         const searchUrl = `${SPACE_DEVS_BASE_URL}/astronaut/?search=${encodeURIComponent(name)}`;
+         const response = await fetch(searchUrl);
+         if (response.ok) {
+            const json = await response.json();
+            // The search is powerful; usually the first result is the correct person
+            if (json.results && json.results.length > 0) {
+               liveData = json.results[0];
+            }
+         }
+       } catch (e) {
+         console.warn(`Live fetch failed for ${name}`, e);
+       }
 
-    // 2. Try to fetch Rich Data (SpaceDevs)
-    try {
-      const richResponse = await fetch(LL2_API_ASTRONAUTS);
-      if (richResponse.ok) {
-        const richData = await richResponse.json();
-        richAstronauts = richData.results || [];
-      }
-    } catch (enrichmentError) {
-      console.warn("LL2 Enrichment skipped/failed (using DB fallback)", enrichmentError);
-    }
+       // --- MERGE STRATEGY ---
+       // 1. Start with Basic Open Notify Data
+       // 2. Enhance with Live API if available
+       // 3. Fallback/Override with Local DB for critical missing pieces
 
-    // 3. Merge Strategy: Basic -> Local DB -> Live API
-    const mergedCrew = issCrew.map((basicAstronaut: any) => {
-      // Step A: Look up in Local DB
-      const dbData = MISSION_DB[basicAstronaut.name];
+       // IMAGE PRIORITY: Live API > Local DB > Placeholder
+       // User Request: "Merge image... enhance what we have". 
+       // We prefer the Live API image if it exists (restoring the "images we had before"),
+       // but fallback to DB if the API fails or has no image.
+       const image = liveData?.profile_image || liveData?.profile_image_thumbnail || dbData?.image;
 
-      // Step B: Look up in Live API
-      const liveData = richAstronauts.find((ra: any) => 
-        ra.name.toLowerCase().includes(basicAstronaut.name.toLowerCase()) || 
-        basicAstronaut.name.toLowerCase().includes(ra.name.toLowerCase())
-      );
+       // DATE PRIORITY: Local DB > Live API
+       // User Request: "The data [launch dates] is back [with DB]".
+       // Live API dates are often missing for active missions or require complex parsing.
+       // DB dates are manually curated and reliable.
+       let launchDate = dbData?.start;
+       
+       // If DB date is missing, try to extract from Live Data
+       if (!launchDate && liveData) {
+         const flights = (liveData.flights || []).sort((a: any, b: any) => 
+             new Date(b.window_start || 0).getTime() - new Date(a.window_start || 0).getTime()
+         );
+         launchDate = flights[0]?.window_start;
+       }
 
-      // Extract Launch Date: Live API > DB > Undefined
-      let launchDate = undefined;
-      if (liveData) {
-        // Sort flights to find the active one
-        const flights = (liveData.flights || []).sort((a: any, b: any) => 
-            new Date(b.window_start || 0).getTime() - new Date(a.window_start || 0).getTime()
-        );
-        launchDate = flights[0]?.window_start;
-      }
-      // Fallback to DB if live data missing or no launch date found
-      if (!launchDate && dbData) {
-        launchDate = dbData.start;
-      }
+       // ROLE/AGENCY PRIORITY: Live API > Local DB
+       // Live API usually has accurate current roles/agencies.
+       const role = liveData?.type?.name || dbData?.role || "Astronaut";
+       const agency = liveData?.agency?.name || dbData?.agency;
+       const bio = liveData?.bio || "No biography available via secure uplink.";
 
-      return {
-        ...basicAstronaut,
-        // Live image > None (DB doesn't store images to save space)
-        image: liveData?.profile_image_thumbnail || liveData?.profile_image,
-        // Live role > DB role > Default
-        role: liveData?.type?.name || dbData?.role || "Astronaut",
-        // Live agency > DB agency
-        agency: liveData?.agency?.name || dbData?.agency,
-        bio: liveData?.bio,
-        launchDate: launchDate,
-        endDate: dbData?.end // Prefer DB for end dates as API often omits them for active missions
-      };
+       return {
+         ...basicAstronaut,
+         image,
+         role,
+         agency,
+         bio,
+         launchDate,
+         endDate: dbData?.end
+       };
     });
+
+    const mergedCrew = await Promise.all(enrichedCrewPromises);
 
     return {
       message: "success",
@@ -188,13 +311,21 @@ export const fetchCrewData = async (): Promise<CrewData> => {
         craft: 'ISS',
         ...MISSION_DB[name],
         launchDate: MISSION_DB[name].start,
-        endDate: MISSION_DB[name].end
+        endDate: MISSION_DB[name].end,
+        image: MISSION_DB[name].image
     }));
+
+    // Dedup fallback list based on image
+    const uniqueFallbackList = fallbackList.filter((item, index, self) =>
+        index === self.findIndex((t) => (
+            t.image === item.image
+        ))
+    );
 
     return {
         message: "cached_fallback",
-        number: fallbackList.length,
-        people: fallbackList
+        number: uniqueFallbackList.length,
+        people: uniqueFallbackList
     };
   }
 };

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCrewData } from '../lib/api';
 import { User, Rocket, UserCircle, Calendar, Clock, AlertTriangle, BadgeCheck, Network } from 'lucide-react';
@@ -45,8 +45,6 @@ const getMissionStats = (person: Astronaut) => {
   const daysInOrbit = Math.floor(elapsed / (1000 * 60 * 60 * 24));
   
   // Calculate percentage (clamped 0-100)
-  // If we are past the estimated end date, cap at 100 or show indefinite?
-  // Capping at 100 for visual sanity, but keeping days accurate.
   const progress = Math.min(100, Math.max(0, (elapsed / totalDuration) * 100));
 
   return {
@@ -57,6 +55,27 @@ const getMissionStats = (person: Astronaut) => {
     endStr: (isEstimatedEnd ? "Est. " : "") + new Date(end).toISOString().split('T')[0],
     isUnknown: false
   };
+};
+
+// Component for handling Image loading states
+const CrewImage: React.FC<{ src?: string; alt: string }> = ({ src, alt }) => {
+    const [error, setError] = useState(false);
+
+    if (!src || error) {
+        return <UserCircle className="w-12 h-12 text-matrix-dim" />;
+    }
+
+    return (
+        <>
+            <img 
+            src={src} 
+            alt={alt}
+            onError={() => setError(true)}
+            className="w-full h-full object-cover grayscale sepia brightness-75 contrast-125 hue-rotate-[70deg] hover:grayscale-0 hover:sepia-0 hover:brightness-100 hover:contrast-100 hover:hue-rotate-0 transition-all duration-500"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent pointer-events-none"></div>
+        </>
+    );
 };
 
 export const CrewManifest: React.FC = () => {
@@ -119,18 +138,7 @@ export const CrewManifest: React.FC = () => {
                   {/* Header Section */}
                   <div className="flex items-start gap-4 mb-6 relative z-10">
                     <div className="w-20 h-20 rounded bg-matrix-dim/10 flex items-center justify-center border border-matrix-dim/50 group-hover:bg-matrix-text/10 transition-colors shrink-0 overflow-hidden relative">
-                       {person.image ? (
-                           <>
-                             <img 
-                               src={person.image} 
-                               alt={person.name}
-                               className="w-full h-full object-cover grayscale sepia brightness-75 contrast-125 hue-rotate-[70deg] hover:grayscale-0 hover:sepia-0 hover:brightness-100 hover:contrast-100 hover:hue-rotate-0 transition-all duration-500"
-                             />
-                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent pointer-events-none"></div>
-                           </>
-                       ) : (
-                           <UserCircle className="w-12 h-12 text-matrix-dim" />
-                       )}
+                       <CrewImage src={person.image} alt={person.name} />
                     </div>
                     
                     <div className="flex-1 min-w-0">
