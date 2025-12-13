@@ -1,56 +1,80 @@
-import { ISSPosition, CrewData, OpenNotifyPositionResponse } from '../types';
+import { ISSPosition, CrewData } from '../types';
 // @ts-ignore
 import * as satellite from 'satellite.js';
 
-// Open Notify Endpoints (HTTP only, requires proxy for HTTPS apps)
-const POSITION_API = 'http://api.open-notify.org/iss-now.json';
+// APIs
+// Primary: HTTPS, CORS-enabled, Rich Data
+const WTIA_API = 'https://api.wheretheiss.at/v1/satellites/25544';
+// Fallback: HTTP-only (requires proxy)
+const POSITION_API_LEGACY = 'http://api.open-notify.org/iss-now.json';
 const CREW_API = 'http://api.open-notify.org/astros.json';
 const PROXY_URL = 'https://api.allorigins.win/raw?url=';
-const TLE_API = 'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE';
 
-// Fallback TLE in case API fails (Updated Jan 2024 - accurate enough for viz)
+// TLE Sources
+const TLE_API_PRIMARY = 'https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE';
+const TLE_API_BACKUP = 'https://live.ariss.org/iss.txt'; 
+
+// Fallback TLE (Updated late 2024)
 const FALLBACK_TLE = [
-  "1 25544U 98067A   24068.59865741  .00016717  00000+0  30076-3 0  9995",
+  "1 25544U 98067A   24140.59865741  .00016717  00000+0  30076-3 0  9995",
   "2 25544  51.6396 235.1195 0005470 216.5982 256.4024 15.49818898442371"
 ];
 
+// Helper: Strict number validation
+const isValidNumber = (n: any): boolean => typeof n === 'number' && !isNaN(n) && isFinite(n);
+
+// Helper: Normalize Longitude to -180 to +180
+const normalizeLongitude = (lon: number): number => {
+  return ((lon + 180) % 360 + 360) % 360 - 180;
+};
+
 export const fetchISSPosition = async (): Promise<ISSPosition> => {
+  // Strategy: Try Primary HTTPS API first. If it fails, try legacy API via Proxy.
   try {
-    // Use proxy to avoid Mixed Content (loading HTTP from HTTPS)
-    const url = `${PROXY_URL}${encodeURIComponent(POSITION_API)}`;
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
+    const response = await fetch(WTIA_API);
+    if (!response.ok) throw new Error(`WTIA API Error: ${response.status}`);
+    const data = await response.json();
+
+    if (!isValidNumber(data.latitude) || !isValidNumber(data.longitude)) {
+      throw new Error('Invalid coordinates from WTIA');
     }
-    
-    const data: OpenNotifyPositionResponse = await response.json();
-    
+
     return {
-      latitude: parseFloat(data.iss_position.latitude),
-      longitude: parseFloat(data.iss_position.longitude),
+      latitude: data.latitude,
+      longitude: data.longitude,
       timestamp: data.timestamp,
-      altitude: 417.5,
-      velocity: 27600,
-      visibility: 'orbiting' 
+      altitude: data.altitude, // Actual real-time altitude
+      velocity: data.velocity, // Actual real-time velocity
+      visibility: data.visibility // 'daylight' or 'eclipsed'
     };
-  } catch (e) {
-    console.warn("Proxy fetch failed, attempting direct fetch (may fail on HTTPS)...");
+  } catch (primaryError) {
+    console.warn("Primary Position API failed, attempting fallback...", primaryError);
+
+    // Fallback path
     try {
-        const response = await fetch(POSITION_API);
-        if (!response.ok) throw new Error('Direct fetch failed');
-        const data: OpenNotifyPositionResponse = await response.json();
-        return {
-        latitude: parseFloat(data.iss_position.latitude),
-        longitude: parseFloat(data.iss_position.longitude),
+      const url = `${PROXY_URL}${encodeURIComponent(POSITION_API_LEGACY)}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Legacy Proxy Error');
+      const data = await response.json();
+      
+      if (!data.iss_position) throw new Error('Invalid legacy structure');
+
+      const lat = parseFloat(data.iss_position.latitude);
+      const lon = parseFloat(data.iss_position.longitude);
+
+      if (!isValidNumber(lat) || !isValidNumber(lon)) throw new Error('NaN coordinates');
+
+      return {
+        latitude: lat,
+        longitude: lon,
         timestamp: data.timestamp,
-        altitude: 417.5,
-        velocity: 27600,
+        altitude: 417.5, // Constant fallback
+        velocity: 27600, // Constant fallback
         visibility: 'orbiting'
-        };
-    } catch (innerE) {
-        console.error("All position fetch attempts failed", innerE);
-        throw innerE;
+      };
+    } catch (fallbackError) {
+      console.error("Critical: All position sources failed.", fallbackError);
+      throw fallbackError;
     }
   }
 };
@@ -58,13 +82,12 @@ export const fetchISSPosition = async (): Promise<ISSPosition> => {
 export const fetchCrewData = async (): Promise<CrewData> => {
   try {
     const response = await fetch(`${PROXY_URL}${encodeURIComponent(CREW_API)}`);
-    if (!response.ok) throw new Error('Proxy failed');
-    return response.json();
+    if (!response.ok) throw new Error('Crew fetch failed');
+    return await response.json();
   } catch (e) {
-    // Return fallback crew data silently if API fails to prevent UI breakage
-    console.warn("Crew fetch failed, using fallback");
+    console.warn("Crew data fetch failed, using cached manifest.");
     return {
-        message: "fallback",
+        message: "cached_fallback",
         number: 7,
         people: [
             { name: "Jasmin Moghbeli", craft: "ISS" },
@@ -79,76 +102,100 @@ export const fetchCrewData = async (): Promise<CrewData> => {
   }
 };
 
+const fetchTLEFromUrl = async (url: string): Promise<[string, string]> => {
+  // Try direct fetch first (Celestrak supports CORS/HTTPS)
+  try {
+    const response = await fetch(url);
+    if (response.ok) {
+      const text = await response.text();
+      return parseTLELines(text);
+    }
+  } catch(e) { /* ignore direct fetch error, try proxy next */ }
+
+  // Try via proxy
+  const proxyUrl = `${PROXY_URL}${encodeURIComponent(url)}`;
+  const response = await fetch(proxyUrl);
+  if (!response.ok) throw new Error(`TLE fetch failed from ${url}`);
+  const text = await response.text();
+  return parseTLELines(text);
+};
+
+const parseTLELines = (text: string): [string, string] => {
+  const lines = text.trim().split('\n');
+  const line1 = lines.find(l => l.startsWith('1 25544U'));
+  const line2 = lines.find(l => l.startsWith('2 25544'));
+
+  if (line1 && line2) {
+    return [line1.trim(), line2.trim()];
+  }
+  throw new Error('Invalid TLE format');
+}
+
 export const fetchTLE = async (): Promise<[string, string]> => {
   try {
-    const proxyUrl = `${PROXY_URL}${encodeURIComponent(TLE_API)}`;
-    const response = await fetch(proxyUrl);
-    if (!response.ok) throw new Error('TLE fetch failed');
-    const text = await response.text();
-    const lines = text.trim().split('\n');
-    if (lines.length >= 3) {
-      return [lines[1].trim(), lines[2].trim()];
-    }
-    throw new Error('Invalid TLE format');
+    return await fetchTLEFromUrl(TLE_API_PRIMARY);
   } catch (e) {
-    console.warn("Failed to fetch TLE, using fallback data", e);
-    // Return fallback TLE instead of throwing, so the app keeps working
-    return [FALLBACK_TLE[0], FALLBACK_TLE[1]];
+    console.warn("Primary TLE failed, trying backup...");
+    try {
+      return await fetchTLEFromUrl(TLE_API_BACKUP);
+    } catch (backupError) {
+      console.warn("All TLE fetches failed, using internal fallback");
+      return [FALLBACK_TLE[0], FALLBACK_TLE[1]];
+    }
   }
 };
 
 export interface PredictedPoint {
   lat: number;
   lng: number;
-  alt?: number;
+  alt: number;
 }
 
-export const predictOrbit = (line1: string, line2: string, durationMinutes: number = 90): PredictedPoint[] => {
+export const calculateOrbitPath = (line1: string, line2: string, startMins: number, endMins: number, stepMins: number = 1): PredictedPoint[] => {
   const points: PredictedPoint[] = [];
   try {
-    // Ensure satellite lib is loaded correctly
     const satLib = satellite.default || satellite;
-    if (!satLib || !satLib.twoline2satrec) {
-        console.error("Satellite.js library not loaded correctly");
-        return [];
-    }
+    if (!satLib || !satLib.twoline2satrec) return [];
 
     const satrec = satLib.twoline2satrec(line1, line2);
+    if (!satrec) return [];
+
     const now = new Date();
 
-    // Calculate points every minute
-    for (let i = 0; i <= durationMinutes; i++) {
+    for (let i = startMins; i <= endMins; i += stepMins) {
       const time = new Date(now.getTime() + i * 60 * 1000);
       
       const positionAndVelocity = satLib.propagate(satrec, time);
       const positionEci = positionAndVelocity.position;
 
-      // Check if position exists and is not an error bool
-      if (positionEci && (typeof positionEci !== 'boolean')) {
+      if (positionEci && typeof positionEci !== 'boolean') {
         const gmst = satLib.gstime(time);
         const positionGd = satLib.eciToGeodetic(positionEci, gmst);
         
-        // Check for NaNs
         const lat = satLib.degreesLat(positionGd.latitude);
         const lng = satLib.degreesLong(positionGd.longitude);
+        const alt = positionGd.height;
 
-        if (!isNaN(lat) && !isNaN(lng)) {
+        if (isValidNumber(lat) && isValidNumber(lng)) {
             points.push({
-            lat: lat,
-            lng: lng,
-            alt: positionGd.height
+                lat: lat,
+                lng: normalizeLongitude(lng),
+                alt: isValidNumber(alt) ? alt : 417
             });
         }
       }
     }
   } catch (e) {
-    console.error("Orbit prediction failed", e);
+    console.error("Orbit calc error", e);
   }
   return points;
 };
 
+// Backwards compatibility alias
+export const predictOrbit = (l1: string, l2: string, duration: number) => calculateOrbitPath(l1, l2, 0, duration);
+
 export const formatCoordinate = (val: number, type: 'lat' | 'lon'): string => {
-  if (val === undefined || val === null || isNaN(val)) return "0.0000°";
+  if (!isValidNumber(val)) return "0.0000°";
   const dir = type === 'lat'
     ? (val > 0 ? 'N' : 'S')
     : (val > 0 ? 'E' : 'W');

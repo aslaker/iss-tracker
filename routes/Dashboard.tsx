@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import Globe, { GlobeMethods } from 'react-globe.gl';
 import { useQuery } from '@tanstack/react-query';
-import { fetchISSPosition, fetchTLE, predictOrbit } from '../lib/api';
+import { fetchISSPosition, fetchTLE, calculateOrbitPath } from '../lib/api';
 import { StatsPanel } from '../components/StatsPanel';
-import { Maximize, Minimize, RotateCw } from 'lucide-react';
+import { Minimize, RotateCw } from 'lucide-react';
 
 export const ISSTracker: React.FC = () => {
   const globeEl = useRef<GlobeMethods | undefined>(undefined);
@@ -11,18 +11,18 @@ export const ISSTracker: React.FC = () => {
   const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Live Position Query
+  // Live Position
   const { data, isLoading, isError } = useQuery({
     queryKey: ['issPosition'],
     queryFn: fetchISSPosition,
     refetchInterval: 5000,
   });
 
-  // TLE / Prediction Query
+  // TLE Data
   const { data: tleData } = useQuery({
     queryKey: ['issTLE'],
     queryFn: fetchTLE,
-    staleTime: 1000 * 60 * 60, // 1 hour cache for TLE
+    staleTime: 1000 * 60 * 60,
   });
 
   // Handle Resize
@@ -36,11 +36,11 @@ export const ISSTracker: React.FC = () => {
       }
     };
     window.addEventListener('resize', handleResize);
-    handleResize(); // Initial
+    handleResize(); 
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Update Globe Position (Center on ISS)
+  // Center Globe on ISS
   useEffect(() => {
     if (data && globeEl.current && 
         typeof data.latitude === 'number' && !isNaN(data.latitude) &&
@@ -48,68 +48,76 @@ export const ISSTracker: React.FC = () => {
       globeEl.current.pointOfView({
         lat: data.latitude,
         lng: data.longitude,
-        altitude: 1.8 // View altitude
+        altitude: 1.8 
       }, 1000);
     }
   }, [data]);
 
-  // Generate Trailed Path Data (History)
-  interface PathPoint {
-    lat: number;
-    lng: number;
-    alt: number;
-  }
-  const [historyPath, setHistoryPath] = useState<PathPoint[]>([]);
-
-  useEffect(() => {
-    if (data && typeof data.latitude === 'number' && typeof data.longitude === 'number' && 
-        !isNaN(data.latitude) && !isNaN(data.longitude)) {
-      setHistoryPath(prev => {
-        const newPoint: PathPoint = { lat: data.latitude, lng: data.longitude, alt: 0.1 };
-        const newPath = [...prev, newPoint];
-        // Keep trail length manageable
-        if (newPath.length > 50) return newPath.slice(newPath.length - 50);
-        return newPath;
-      });
+  const { historyPath, predictedPath } = useMemo(() => {
+    if (!tleData || !Array.isArray(tleData) || tleData.length < 2) {
+        return { historyPath: [], predictedPath: [] };
     }
-  }, [data]);
+    
+    // Calculate paths
+    const hist = calculateOrbitPath(tleData[0], tleData[1], -45, 0);
+    const pred = calculateOrbitPath(tleData[0], tleData[1], 0, 60);
 
-  // Generate Predicted Path Data
-  const predictedPath = useMemo(() => {
-    if (!tleData) return [];
-    const points = predictOrbit(tleData[0], tleData[1], 65); // 65 minutes prediction
-    return points.map(p => ({ lat: p.lat, lng: p.lng, alt: 0.1 }));
+    // CRITICAL: Three.js will crash if passed empty arrays nested in pathsData
+    // We strictly filter for arrays that have length > 0
+    return { 
+      historyPath: hist.length > 0 ? hist : [], 
+      predictedPath: pred.length > 0 ? pred : [] 
+    };
   }, [tleData]);
 
+  // Consolidate paths for the globe prop. Filter out empty arrays.
+  const globePathsData = useMemo(() => {
+      const paths = [];
+      if (historyPath.length > 1) paths.push(historyPath);
+      if (predictedPath.length > 1) paths.push(predictedPath);
+      return paths;
+  }, [historyPath, predictedPath]);
+
+  // STRICT NaN CHECK for Points Data
   const gData = useMemo(() => {
-    return (data && typeof data.latitude === 'number' && typeof data.longitude === 'number') ? [{
-      lat: data.latitude,
-      lng: data.longitude,
-      alt: 0.1,
-      radius: 1.5,
-      color: '#00FF41'
-    }] : [];
+    if (data && 
+        typeof data.latitude === 'number' && !isNaN(data.latitude) && 
+        typeof data.longitude === 'number' && !isNaN(data.longitude)) {
+      return [{
+        lat: data.latitude,
+        lng: data.longitude,
+        alt: 0.1,
+        radius: 1.5,
+        color: '#00FF41'
+      }];
+    }
+    return [];
   }, [data]);
 
+  // STRICT NaN CHECK for Rings Data
   const ringsData = useMemo(() => {
-    return (data && typeof data.latitude === 'number' && typeof data.longitude === 'number') ? [{
-      lat: data.latitude,
-      lng: data.longitude,
-      alt: 0.1,
-      maxR: 8,
-      propagationSpeed: 4,
-      repeatPeriod: 1000
-    }] : [];
+    if (data && 
+        typeof data.latitude === 'number' && !isNaN(data.latitude) && 
+        typeof data.longitude === 'number' && !isNaN(data.longitude)) {
+      return [{
+        lat: data.latitude,
+        lng: data.longitude,
+        alt: 0.1,
+        maxR: 8,
+        propagationSpeed: 4,
+        repeatPeriod: 1000
+      }];
+    }
+    return [];
   }, [data]);
 
   return (
     <div className="flex flex-col md:flex-row h-full w-full relative">
-      {/* 3D Globe Container */}
       <div ref={containerRef} className="flex-1 relative bg-black overflow-hidden border-r border-matrix-dim">
         <div className="absolute top-4 left-4 z-10 flex gap-2">
            <button
              onClick={() => {
-               if(data && typeof data.latitude === 'number' && !isNaN(data.latitude)) {
+               if(data && !isNaN(data.latitude) && !isNaN(data.longitude)) {
                  globeEl.current?.pointOfView({ lat: data.latitude, lng: data.longitude, altitude: 1.8 }, 1000)
                }
              }}
@@ -127,17 +135,15 @@ export const ISSTracker: React.FC = () => {
            </button>
         </div>
 
-        {/* Legend / Status for Prediction */}
         {predictedPath.length > 0 && (
           <div className="absolute top-4 right-4 z-10 pointer-events-none">
             <div className="flex items-center gap-2 text-[10px] text-matrix-dim bg-black/50 p-1 border border-matrix-dim/30">
               <span className="w-3 h-0.5 bg-[#00FF41] opacity-50 border-t border-b border-black"></span>
-              <span>PREDICTED_ORBIT (+60MIN)</span>
+              <span>ORBITAL_PATH (TLE_PROJECTION)</span>
             </div>
           </div>
         )}
 
-        {/* Loading / Error States */}
         {isLoading && !globeReady && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
             <div className="text-matrix-text animate-pulse font-mono text-xl">INITIALIZING TERRAIN GENERATION...</div>
@@ -161,41 +167,34 @@ export const ISSTracker: React.FC = () => {
           atmosphereColor="#00FF41"
           atmosphereAltitude={0.15}
           
-          // Points
           pointsData={gData}
           pointAltitude="alt"
           pointColor="color"
           pointRadius="radius"
           pointPulseBtn={0.5}
           
-          // Rings
           ringsData={ringsData}
           ringColor={() => '#00FF41'}
           ringMaxRadius="maxR"
           ringPropagationSpeed="propagationSpeed"
           ringRepeatPeriod="repeatPeriod"
           
-          // Paths
-          pathsData={[
-            // Historical Path (Solid/Bright)
-            historyPath,
-            // Predicted Path (Faint/Dashed logic via opacity)
-            predictedPath
-          ]}
-          pathColor={(path: any) => path === predictedPath ? 'rgba(0, 255, 65, 0.4)' : '#00FF41'}
-          pathDashLength={(path: any) => path === predictedPath ? 0.5 : 0.1}
-          pathDashGap={(path: any) => path === predictedPath ? 0.2 : 0.05}
-          pathDashAnimateTime={(path: any) => path === predictedPath ? 0 : 2000} // Don't animate prediction path
-          pathPointAlt={0.1}
+          pathsData={globePathsData}
+          // IMPORTANT: Accessors must be defined because our path is an array of objects {lat, lng}, not arrays [lat, lng]
+          pathPointLat={(p: any) => p.lat}
+          pathPointLng={(p: any) => p.lng}
+          pathPointAlt={0.1} // Constant altitude for visualization
+          pathColor={(path: any) => path === predictedPath ? 'rgba(0, 255, 65, 0.5)' : '#00FF41'}
+          pathDashLength={(path: any) => path === predictedPath ? 0.5 : 0.05}
+          pathDashGap={(path: any) => path === predictedPath ? 0.2 : 0}
+          pathDashAnimateTime={(path: any) => path === predictedPath ? 0 : 20000}
+          pathResolution={2} 
           
           onGlobeReady={() => setGlobeReady(true)}
         />
-
-        {/* Overlay Grid/Decorations */}
         <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_0%,#000000_120%)]"></div>
       </div>
 
-      {/* Sidebar Panel */}
       <div className="w-full md:w-80 lg:w-96 flex-none h-[40vh] md:h-auto border-t md:border-t-0 border-matrix-dim">
         <StatsPanel data={data} isLoading={isLoading} />
       </div>
