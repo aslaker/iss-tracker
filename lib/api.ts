@@ -201,3 +201,58 @@ export const formatCoordinate = (val: number, type: 'lat' | 'lon'): string => {
     : (val > 0 ? 'E' : 'W');
   return `${Math.abs(val).toFixed(4)}° ${dir}`;
 };
+
+// --- Orbital Solver Utilities ---
+
+export interface OrbitalData {
+  inclination: number; // degrees
+  eccentricity: number;
+  meanMotion: number; // revs per day
+  period: number; // minutes
+  apogee: number; // km
+  perigee: number; // km
+}
+
+export const calculateOrbitalParameters = (line1: string, line2: string): OrbitalData | null => {
+  try {
+    const satLib = satellite.default || satellite;
+    const satrec = satLib.twoline2satrec(line1, line2);
+    if (!satrec) return null;
+
+    // Conversions
+    // satrec.no is in radians/minute
+    // satrec.inclo is in radians
+    // satrec.ecco is dimensionless
+    
+    const MEAN_MOTION_REV_PER_DAY = satrec.no * 1440 / (2 * Math.PI); 
+    const INCLINATION_DEG = satrec.inclo * 180 / Math.PI;
+    const ECCENTRICITY = satrec.ecco;
+    
+    // Semi-major axis (a) in km calculation
+    // Standard gravitational parameter for Earth (mu) = 398600.4418 km^3/s^2
+    // Mean motion (n) must be in rad/s for this formula
+    const n_rad_s = satrec.no / 60;
+    const mu = 398600.4418;
+    const a = Math.pow(mu / (n_rad_s * n_rad_s), 1/3);
+    
+    // Earth Radius approximation
+    const EARTH_RADIUS = 6378.137; // km
+    
+    const perigee = (a * (1 - ECCENTRICITY)) - EARTH_RADIUS;
+    const apogee = (a * (1 + ECCENTRICITY)) - EARTH_RADIUS;
+    
+    const period = (2 * Math.PI) / n_rad_s / 60; // minutes
+
+    return {
+      inclination: INCLINATION_DEG,
+      eccentricity: ECCENTRICITY,
+      meanMotion: MEAN_MOTION_REV_PER_DAY,
+      period,
+      apogee,
+      perigee
+    };
+  } catch (e) {
+    console.error("Orbital params calculation failed", e);
+    return null;
+  }
+};

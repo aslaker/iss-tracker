@@ -3,13 +3,15 @@ import Globe, { GlobeMethods } from 'react-globe.gl';
 import { useQuery } from '@tanstack/react-query';
 import { fetchISSPosition, fetchTLE, calculateOrbitPath } from '../lib/api';
 import { StatsPanel } from '../components/StatsPanel';
-import { Minimize, RotateCw } from 'lucide-react';
+import { OrbitalSolver } from '../components/OrbitalSolver';
+import { Minimize, RotateCw, Calculator } from 'lucide-react';
 import { terminalAudio } from '../lib/audio';
 
 export const ISSTracker: React.FC = () => {
   const globeEl = useRef<GlobeMethods | undefined>(undefined);
   const [globeReady, setGlobeReady] = useState(false);
   const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
+  const [showOrbitalSolver, setShowOrbitalSolver] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Live Position
@@ -115,6 +117,8 @@ export const ISSTracker: React.FC = () => {
   return (
     <div className="flex flex-col md:flex-row h-full w-full relative">
       <div ref={containerRef} className="flex-1 relative bg-black overflow-hidden border-r border-matrix-dim">
+        
+        {/* HUD Controls */}
         <div className="absolute top-4 left-4 z-10 flex gap-2">
            <button
              onClick={() => {
@@ -124,10 +128,10 @@ export const ISSTracker: React.FC = () => {
                }
              }}
              onMouseEnter={() => terminalAudio.playHover()}
-             className="bg-matrix-dark/80 border border-matrix-dim text-matrix-text p-2 hover:bg-matrix-dim/20 transition"
-             title="Re-center ISS"
+             className="bg-matrix-dark/80 border border-matrix-dim text-matrix-text p-2 hover:bg-matrix-dim/20 transition group"
+             title="Track ISS"
            >
-             <Minimize className="w-4 h-4" />
+             <Minimize className="w-4 h-4 group-hover:scale-110 transition-transform" />
            </button>
            <button
              onClick={() => {
@@ -135,12 +139,37 @@ export const ISSTracker: React.FC = () => {
                  globeEl.current?.pointOfView({ lat: 0, lng: 0, altitude: 2.5 }, 1000);
              }}
              onMouseEnter={() => terminalAudio.playHover()}
-             className="bg-matrix-dark/80 border border-matrix-dim text-matrix-text p-2 hover:bg-matrix-dim/20 transition"
-             title="Reset View"
+             className="bg-matrix-dark/80 border border-matrix-dim text-matrix-text p-2 hover:bg-matrix-dim/20 transition group"
+             title="Reset Camera"
            >
-             <RotateCw className="w-4 h-4" />
+             <RotateCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
+           </button>
+           
+           {/* New Orbital Data Toggle */}
+           <button
+             onClick={() => {
+                 terminalAudio.playClick();
+                 setShowOrbitalSolver(!showOrbitalSolver);
+             }}
+             onMouseEnter={() => terminalAudio.playHover()}
+             className={`bg-matrix-dark/80 border text-matrix-text p-2 hover:bg-matrix-dim/20 transition group flex items-center gap-2 ${showOrbitalSolver ? 'border-matrix-text shadow-[0_0_10px_rgba(0,255,65,0.3)]' : 'border-matrix-dim'}`}
+             title="Orbital Parameters"
+           >
+             <Calculator className="w-4 h-4" />
+             <span className="text-xs font-bold hidden md:inline">ORBIT_DATA</span>
            </button>
         </div>
+
+        {/* Modal Overlay */}
+        {showOrbitalSolver && (
+          <OrbitalSolver 
+            tle={tleData} 
+            onClose={() => {
+              terminalAudio.playClick();
+              setShowOrbitalSolver(false);
+            }} 
+          />
+        )}
 
         {predictedPath.length > 0 && (
           <div className="absolute top-4 right-4 z-10 pointer-events-none">
@@ -187,10 +216,9 @@ export const ISSTracker: React.FC = () => {
           ringRepeatPeriod="repeatPeriod"
           
           pathsData={globePathsData}
-          // IMPORTANT: Accessors must be defined because our path is an array of objects {lat, lng}, not arrays [lat, lng]
           pathPointLat={(p: any) => p.lat}
           pathPointLng={(p: any) => p.lng}
-          pathPointAlt={0.1} // Constant altitude for visualization
+          pathPointAlt={0.1}
           pathColor={(path: any) => path === predictedPath ? 'rgba(0, 255, 65, 0.5)' : '#00FF41'}
           pathDashLength={(path: any) => path === predictedPath ? 0.5 : 0.05}
           pathDashGap={(path: any) => path === predictedPath ? 0.2 : 0}
@@ -202,8 +230,17 @@ export const ISSTracker: React.FC = () => {
         <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_0%,#000000_120%)]"></div>
       </div>
 
-      <div className="w-full md:w-80 lg:w-96 flex-none h-[40vh] md:h-auto border-t md:border-t-0 border-matrix-dim">
+      <div className="w-full md:w-80 lg:w-96 flex-none flex flex-col h-[40vh] md:h-auto border-t md:border-t-0 border-matrix-dim overflow-y-auto custom-scrollbar bg-matrix-bg">
         <StatsPanel data={data} isLoading={isLoading} />
+        {/* Orbital Solver removed from sidebar to be a modal */}
+        <div className="p-4 border-t border-matrix-dim/30 text-center opacity-50 hover:opacity-100 transition-opacity">
+           <div className="text-[10px] text-matrix-dim mb-2">ADDITIONAL MODULES</div>
+           <div className="grid grid-cols-3 gap-2">
+              <div className="h-1 bg-matrix-dim/30"></div>
+              <div className="h-1 bg-matrix-dim/30"></div>
+              <div className="h-1 bg-matrix-dim/30"></div>
+           </div>
+        </div>
       </div>
     </div>
   );

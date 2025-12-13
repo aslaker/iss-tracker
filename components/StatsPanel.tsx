@@ -20,7 +20,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({ data, isLoading }) => {
 
   if (isLoading || !data) {
     return (
-      <div className="h-full w-full flex items-center justify-center border-l border-matrix-dim p-4">
+      <div className="h-full w-full flex items-center justify-center p-4">
         <div className="text-center animate-pulse">
           <p>ACQUIRING_SIGNAL...</p>
           <p className="text-xs text-matrix-dim mt-2">ESTABLISHING UPLINK</p>
@@ -50,7 +50,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({ data, isLoading }) => {
   );
 
   return (
-    <div className="h-full overflow-y-auto p-4 md:border-l border-matrix-dim bg-matrix-bg/80 backdrop-blur-md">
+    <div className="p-4 bg-matrix-bg/80 backdrop-blur-md">
       <div className="mb-6 flex items-center gap-2 border-b border-matrix-dim pb-2">
         <Activity className="w-4 h-4 text-matrix-alert animate-pulse" />
         <h2 className="text-sm font-bold uppercase">
